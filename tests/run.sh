@@ -89,6 +89,7 @@ run_scan empty.ndjson empty.ndjson
 check "U10 pass 1 flags"                   has "$args" "--results=verified,unknown"
 check "U10 pass 2 flags"                   has "$args" "--results=verified --no-ignore-tag"
 check "U10 scans the PR range only"        has "$args" "--since-commit"
+check "U10 scans in place (no clone of the partial clone)" has "$args" "--trust-local-git-config"
 check "U10 comment-only allowlist: no --exclude-paths" hasnt "$args" "--exclude-paths"
 
 EXCLUDE_OVERRIDE=$'# comment\n^vendor/' run_scan empty.ndjson empty.ndjson
@@ -190,6 +191,33 @@ if [[ "${RUN_NETWORK_TESTS:-0}" == "1" ]]; then
   r4() { mkdir -p vendor; echo "url = \"$canary\"" > vendor/x.cfg; git add vendor; c vendored; }
   EXCLUDE_OVERRIDE='^vendor/' run_real r4
   check "R4 central allowlist excludes path" test "$rc" -eq 0
+  # The runner's real layout: actions/checkout with filter: blob:none gives a partial
+  # clone with no local branches, only refs/remotes, and a detached HEAD. TruffleHog
+  # clones file:// repos unless told to trust the local config, and cloning a partial
+  # clone fails (lazy fetching is disabled for upload-pack) -> must not be inconclusive.
+  r5_origin="$(mktemp -d)"
+  git -C "$r5_origin" init -q -b main
+  git -C "$r5_origin" config uploadpack.allowFilter true
+  # The base's README blob is superseded by the head, so the partial checkout lacks it.
+  echo v1 > "$r5_origin/README.md"
+  git -C "$r5_origin" add README.md && git -C "$r5_origin" -c user.email=t@t -c user.name=t commit -q -m base
+  r5_base="$(git -C "$r5_origin" rev-parse HEAD)"
+  echo v2 > "$r5_origin/README.md"; echo "url = \"$canary\"" > "$r5_origin/app.cfg"
+  git -C "$r5_origin" add README.md app.cfg && git -C "$r5_origin" -c user.email=t@t -c user.name=t commit -q -m secret
+  r5_head="$(git -C "$r5_origin" rev-parse HEAD)"
+  r5_ws="$(mktemp -d)"; r5_rt="$(mktemp -d)"
+  git -C "$r5_ws" init -q && git -C "$r5_ws" remote add origin "file://$r5_origin"
+  git -C "$r5_ws" fetch -q --no-tags --filter=blob:none origin '+refs/heads/*:refs/remotes/origin/*'
+  git -C "$r5_ws" checkout -q --force "$r5_head"
+  set +e
+  out="$(cd "$r5_ws" && PATH="$thbin:$PATH" RUNNER_TEMP="$r5_rt" GITHUB_STEP_SUMMARY="$r5_rt/summary.md" \
+    BASE_SHA="$r5_base" EXCLUDE_PATHS="" bash -e -o pipefail -c "$(script_of scan)" 2>&1)"; rc=$?
+  set -e
+  summary="$(cat "$r5_rt/summary.md" 2>/dev/null || true)"
+  check "R5 partial-clone checkout layout scans (not inconclusive)" hasnt "$out" "Secret scan inconclusive"
+  check "R5 partial-clone checkout layout blocks the secret"        has "$out" "Verified credential"
+  check "R5 real run prints no secret"                               leak_free
+  rm -rf "$r5_origin" "$r5_ws" "$r5_rt"
   rm -rf "$tmp"
 fi
 
