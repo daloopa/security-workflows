@@ -48,9 +48,15 @@ bump, not a gate. This check is the enforced control.
 ## Changing a workflow
 
 1. Open a PR here. `test.yml` must pass (`tests/run.sh`, actionlint, shellcheck).
-2. After merge, tag `vX.Y.Z` on main. Tags are immutable (repo ruleset).
-3. Open a PR to `daloopa-terraform-live` that bumps `ref` in
-   `github/org-ruleset/secret-scan.tf`.
+2. After merge, create a new release branch `release/vN` at the merged commit, and
+   optionally tag it `vX.Y.Z` for reference. `release/*` branches are frozen by the
+   repo ruleset "Frozen release branches": they cannot be updated, force-pushed or
+   deleted, so a published version never changes.
+3. Open a PR to `daloopa-terraform-live` that changes `ref` in
+   `github/org-ruleset/secret-scan.tf` to `refs/heads/release/vN`.
+
+The org ruleset pins a **branch**, not a tag, because a ruleset pointed at a tag
+ref never dispatches the workflow.
 
 To run the tests locally, use `tests/run.sh` for the unit tests, or
 `RUN_NETWORK_TESTS=1 tests/run.sh` to add the real-TruffleHog tests (needs network).
