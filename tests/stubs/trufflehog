@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# Test double for TruffleHog. Pass 2 is the run carrying --no-ignore-tag.
+# Writes a sentinel to stderr: the workflow must never print TruffleHog's log.
+printf '%s\n' "$*" >> "$STUB_ARGS_LOG"
+echo "level=info msg=\"verifying SENTINEL_RAW_DO_NOT_PRINT\"" >&2
+for a in "$@"; do
+  if [[ "$a" == "--no-ignore-tag" ]]; then cat "$STUB_PASS2"; exit "${STUB_RC:-0}"; fi
+done
+cat "$STUB_PASS1"
+exit "${STUB_RC:-0}"
