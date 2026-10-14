@@ -60,3 +60,5 @@ ref never dispatches the workflow.
 
 To run the tests locally, use `tests/run.sh` for the unit tests, or
 `RUN_NETWORK_TESTS=1 tests/run.sh` to add the real-TruffleHog tests (needs network).
+
+<!-- EI-2229 fork-PR test, do not merge -->
