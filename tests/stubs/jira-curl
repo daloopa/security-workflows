@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# Test double for curl against the Jira REST API (EI-2451). For a URL ending in
+# /rest/api/3/issue/<KEY>?..., writes $STUB_JIRA_FIXTURES/<KEY>.json to the -o
+# target and prints the HTTP code (from <KEY>.code, else 200 when the .json
+# exists, else 404) when -w is given. STUB_CURL_RC != 0 fails like a transport error.
+[[ "${STUB_CURL_RC:-0}" -eq 0 ]] || exit "$STUB_CURL_RC"
+out="" fmt="" url=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -o) out="$2"; shift ;;
+    -w) fmt="$2"; shift ;;
+    -K|--config|--max-time|-u) shift ;;
+    http*) url="$1" ;;
+  esac
+  shift
+done
+cat > /dev/null  # drain a config piped on stdin (-K -)
+key="${url##*/issue/}"; key="${key%%\?*}"
+dir="${STUB_JIRA_FIXTURES:?}"
+if [[ -f "$dir/$key.json" ]]; then
+  body="$(cat "$dir/$key.json")"; code=200
+else
+  body='{"errorMessages":["Issue does not exist or you do not have permission to see it."]}'; code=404
+fi
+[[ -f "$dir/$key.code" ]] && code="$(cat "$dir/$key.code")"
+[[ -n "$out" ]] && printf '%s' "$body" > "$out"
+[[ -n "$fmt" ]] && printf '%s' "$code"
+exit 0

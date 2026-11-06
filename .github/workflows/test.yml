@@ -29,8 +29,9 @@ jobs:
       - name: Lint
         run: |
           actionlint
-          shellcheck tests/run.sh tests/stubs/trufflehog tests/stubs/curl
+          shellcheck tests/run.sh tests/run_jira.sh tests/stubs/trufflehog tests/stubs/curl tests/stubs/jira-curl
       - name: Test
         run: |
           python3 -c 'import yaml' 2>/dev/null || python3 -m pip install --user pyyaml==6.0.2
           RUN_NETWORK_TESTS=1 tests/run.sh
+          tests/run_jira.sh
