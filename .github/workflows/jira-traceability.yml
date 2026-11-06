@@ -36,8 +36,10 @@ jobs:
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           JIRA_USER: ${{ secrets.JIRA_TRACEABILITY_USER }}
           JIRA_TOKEN: ${{ secrets.JIRA_TRACEABILITY_TOKEN }}
-          # Org variable, for when a scoped token must go through the API gateway.
+          # Org variables: a service-account (scoped) token must go through the API
+          # gateway, https://api.atlassian.com/ex/jira/<cloudId>, and may need Bearer.
           JIRA_BASE_URL: ${{ vars.JIRA_TRACEABILITY_BASE_URL || 'https://daloopainc.atlassian.net' }}
+          JIRA_AUTH_SCHEME: ${{ vars.JIRA_TRACEABILITY_AUTH_SCHEME || 'basic' }}
         run: |
           summary() { echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
           fail() { echo "::error title=Jira traceability::$1"; summary "- ❌ $1"; }
@@ -61,14 +63,24 @@ jobs:
           keys=("$canonical")
           if [[ -n "$title_key" && -n "$branch_key" && "$branch_key" != "$title_key" ]]; then keys+=("$branch_key"); fi
 
-          if [[ -z "${JIRA_USER:-}" || -z "${JIRA_TOKEN:-}" ]]; then
-            inconclusive "Jira credentials are not available to this repository"
-          fi
+          case "${JIRA_AUTH_SCHEME:-basic}" in
+            basic)  [[ -n "${JIRA_USER:-}" && -n "${JIRA_TOKEN:-}" ]] || inconclusive "Jira credentials are not available to this repository" ;;
+            bearer) [[ -n "${JIRA_TOKEN:-}" ]] || inconclusive "Jira credentials are not available to this repository" ;;
+            *) inconclusive "unknown JIRA_TRACEABILITY_AUTH_SCHEME" ;;
+          esac
+          # curl reads its credentials from stdin (-K -), never from its arguments.
+          auth_config() {
+            if [[ "$JIRA_AUTH_SCHEME" == bearer ]]; then
+              printf 'header = "Authorization: Bearer %s"\n' "$JIRA_TOKEN"
+            else
+              printf 'user = "%s:%s"\n' "$JIRA_USER" "$JIRA_TOKEN"
+            fi
+          }
 
           body="$(mktemp)"
           errors=0
           for key in "${keys[@]}"; do
-            if ! code="$(printf 'user = "%s:%s"\n' "$JIRA_USER" "$JIRA_TOKEN" \
+            if ! code="$(auth_config \
                 | curl -sS --max-time 20 -K - -o "$body" -w '%{http_code}' \
                   "$JIRA_BASE_URL/rest/api/3/issue/$key?fields=status,summary")"; then
               inconclusive "could not reach Jira for $key"

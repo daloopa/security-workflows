@@ -67,8 +67,10 @@ Required on the default branch of `daloopa-terraform-live` and `daloopa-infra-ad
 
 The job never checks out your code. It reads only the PR title and branch, and queries Jira with a
 read-only service account. Its secrets are the org secrets `JIRA_TRACEABILITY_USER` and
-`JIRA_TRACEABILITY_TOKEN`, visible only to the gated repos, plus the optional org variable
-`JIRA_TRACEABILITY_BASE_URL`.
+`JIRA_TRACEABILITY_TOKEN`, visible only to the gated repos, plus two optional org variables:
+`JIRA_TRACEABILITY_BASE_URL` and `JIRA_TRACEABILITY_AUTH_SCHEME` (`basic` or `bearer`). An Atlassian
+service account only gets scoped tokens, and those go through the gateway
+`https://api.atlassian.com/ex/jira/<cloudId>`.
 
 ## Changing a workflow
 

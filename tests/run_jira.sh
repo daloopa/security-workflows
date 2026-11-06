@@ -15,7 +15,8 @@ check() { local name="$1"; shift; if "$@"; then ok "$name"; else bad "$name"; fi
 has()    { grep -qF -- "$2" <<<"$1"; }
 hasnt()  { ! grep -qF -- "$2" <<<"$1"; }
 
-# run_check <title> <branch> [curl-rc] — sets out, summary, rc, pwned
+# run_check <title> <branch> [curl-rc] — sets out, summary, rc, pwned, cfg
+# Optional: AUTH_SCHEME (default basic), USER_OVERRIDE (default svc@example.test)
 run_check() {
   local tmp script
   tmp="$(mktemp -d)"; mkdir -p "$tmp/bin"
@@ -25,12 +26,14 @@ run_check() {
   fi
   set +e
   out="$(cd "$tmp" && PATH="$tmp/bin:$PATH" TMPDIR="$tmp" GITHUB_STEP_SUMMARY="$tmp/summary.md" \
-    PR_TITLE="$1" HEAD_REF="$2" JIRA_USER="svc@example.test" JIRA_TOKEN="$TOKEN" \
+    PR_TITLE="$1" HEAD_REF="$2" JIRA_USER="${USER_OVERRIDE-svc@example.test}" JIRA_TOKEN="$TOKEN" \
+    JIRA_AUTH_SCHEME="${AUTH_SCHEME:-basic}" STUB_CONFIG_LOG="$tmp/curl-config" \
     JIRA_BASE_URL="https://jira.example.test" STUB_JIRA_FIXTURES="$here/fixtures/jira" \
     STUB_CURL_RC="${3:-0}" bash -e -o pipefail -c "$script" 2>&1)"
   rc=$?
   set -e
   summary="$(cat "$tmp/summary.md" 2>/dev/null || true)"
+  cfg="$(cat "$tmp/curl-config" 2>/dev/null || true)"
   if [[ -e "$tmp/pwned" || -e "$tmp/pwned2" ]]; then pwned=yes; else pwned=no; fi
   rm -rf "$tmp"
 }
@@ -85,6 +88,15 @@ for t in "EI-100: x|EI-100/x" "EI-999: x|feature/x" "AUTH-1: x|feature/x"; do
   run_check "${t%%|*}" "${t##*|}"
   check "J10 token never printed (${t%%|*})"   hasnt "$out$summary" "$TOKEN"
 done
+
+run_check "EI-100: x" "feature/x"
+check "J11 basic auth (default) passes"          test "$rc" -eq 0
+check "J11 basic auth sends user:token on stdin" has "$cfg" 'user = "svc@example.test:'
+AUTH_SCHEME=bearer USER_OVERRIDE="" run_check "EI-100: x" "feature/x"
+check "J11 bearer auth passes without a user"    test "$rc" -eq 0
+check "J11 bearer auth sends the header"         has "$cfg" "Authorization: Bearer"
+check "J11 bearer auth sends no user line"       hasnt "$cfg" "user ="
+check "J11 bearer token never printed"           hasnt "$out$summary" "$TOKEN"
 
 echo "jira-traceability: $passed passed, $failed failed"
 [[ "$failed" -eq 0 ]]

@@ -14,7 +14,8 @@ while [[ $# -gt 0 ]]; do
   esac
   shift
 done
-cat > /dev/null  # drain a config piped on stdin (-K -)
+# Record (or drain) the config piped on stdin (-K -).
+if [[ -n "${STUB_CONFIG_LOG:-}" ]]; then cat > "$STUB_CONFIG_LOG"; else cat > /dev/null; fi
 key="${url##*/issue/}"; key="${key%%\?*}"
 dir="${STUB_JIRA_FIXTURES:?}"
 if [[ -f "$dir/$key.json" ]]; then
