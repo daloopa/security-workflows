@@ -23,6 +23,9 @@ permissions: {}
 jobs:
   jira:
     name: Jira traceability
+    # This repo only hosts the workflow; it has no Jira credentials, so here the
+    # check would always be inconclusive. It runs in the repos the org ruleset gates.
+    if: github.repository != 'daloopa/security-workflows'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
