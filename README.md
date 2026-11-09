@@ -45,6 +45,33 @@ contains a known credential pattern before the credential becomes public. GitHub
 anyone with write access a link to "allow" the secret. That makes push protection a speed
 bump, not a gate. This check is the enforced control.
 
+## jira-traceability
+
+Required on the default branch of `daloopa-terraform-live` and `daloopa-infra-addons` (org ruleset
+"Jira traceability (EI-1686 D18)", EI-2451). Every PR must derive from an existing Jira item:
+
+- Start the **PR title** with the key, `KEY-123: what changes`, or the **branch** with it,
+  `KEY-123/short-desc`. Any Jira project counts. Keys are case-sensitive: `ei-123` does not count.
+- The canonical key (from the title if present, otherwise from the branch) must exist and **must not
+  be Done**. A second, different key in the branch must also exist.
+- No exceptions, automation included: automated PRs carry a standing ticket key.
+
+### I was blocked. What now?
+
+| Message | Fix |
+|---|---|
+| `no Jira key` | Edit the PR title to start with `KEY-123:`. The check re-runs on edit. |
+| `KEY-123 not found` | Check the key. It may also be in a project the traceability account cannot see; ask DevOps. |
+| `KEY-123 is Done` | Reopen the ticket, or create a follow-up ticket and use its key. |
+| `inconclusive` | Jira was unreachable, or the credentials failed. This is not your PR: re-run the job, and ask DevOps if it persists. |
+
+The job never checks out your code. It reads only the PR title and branch, and queries Jira with a
+read-only service account. Its secrets are the org secrets `JIRA_TRACEABILITY_USER` and
+`JIRA_TRACEABILITY_TOKEN`, visible only to the gated repos, plus two optional org variables:
+`JIRA_TRACEABILITY_BASE_URL` and `JIRA_TRACEABILITY_AUTH_SCHEME` (`basic` or `bearer`). An Atlassian
+service account only gets scoped tokens, and those go through the gateway
+`https://api.atlassian.com/ex/jira/<cloudId>`.
+
 ## Changing a workflow
 
 1. Open a PR here. `test.yml` must pass (`tests/run.sh`, actionlint, shellcheck).
@@ -58,5 +85,5 @@ bump, not a gate. This check is the enforced control.
 The org ruleset pins a **branch**, not a tag, because a ruleset pointed at a tag
 ref never dispatches the workflow.
 
-To run the tests locally, use `tests/run.sh` for the unit tests, or
+To run the tests locally, use `tests/run.sh` (secret-scan) and `tests/run_jira.sh` (jira-traceability) for the unit tests, or
 `RUN_NETWORK_TESTS=1 tests/run.sh` to add the real-TruffleHog tests (needs network).

@@ -1,0 +1,109 @@
+# Org-required Jira traceability check (EI-2451, Epic EI-1686 decision D18).
+# Enforced on the default branch of daloopa-terraform-live and daloopa-infra-addons
+# by the org ruleset "Jira traceability (EI-1686 D18)" (daloopa-terraform-live,
+# github/org-ruleset/). Every PR must derive from an existing Jira item:
+# - its title starts with KEY-123 (followed by ":", a space or the end), or its
+#   branch starts with KEY-123 (followed by "/", "-" or the end), in any project;
+# - the canonical key (title first, else branch) must exist and not be Done;
+# - any other key found must exist.
+#
+# Security: no checkout, so PR code never runs here. The title and branch arrive
+# through env and are never echoed. The token is read from org secrets (a
+# read-only service account) and passed to curl on stdin, never as an argument.
+# Jira unreachable or rejecting the credentials is "inconclusive" and fails; it is
+# never read as a pass or as "no key".
+name: jira-traceability
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+
+permissions: {}
+
+jobs:
+  jira:
+    name: Jira traceability
+    # This repo only hosts the workflow; it has no Jira credentials, so here the
+    # check would always be inconclusive. It runs in the repos the org ruleset gates.
+    if: github.repository != 'daloopa/security-workflows'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check the PR derives from a Jira item
+        id: check
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          JIRA_USER: ${{ secrets.JIRA_TRACEABILITY_USER }}
+          JIRA_TOKEN: ${{ secrets.JIRA_TRACEABILITY_TOKEN }}
+          # Org variables: a service-account (scoped) token must go through the API
+          # gateway, https://api.atlassian.com/ex/jira/<cloudId>, and may need Bearer.
+          JIRA_BASE_URL: ${{ vars.JIRA_TRACEABILITY_BASE_URL || 'https://daloopainc.atlassian.net' }}
+          JIRA_AUTH_SCHEME: ${{ vars.JIRA_TRACEABILITY_AUTH_SCHEME || 'basic' }}
+        run: |
+          summary() { echo "$1" >> "$GITHUB_STEP_SUMMARY"; }
+          fail() { echo "::error title=Jira traceability::$1"; summary "- ❌ $1"; }
+          inconclusive() {
+            echo "::error title=Jira traceability inconclusive::$1. This is not a problem with your PR: re-run the job; if it persists, ask DevOps."
+            summary "- ⚠️ Inconclusive: $1"
+            exit 1
+          }
+          summary "## Jira traceability"
+
+          title_re='^([A-Z][A-Z0-9]+-[0-9]+)([: ]|$)'
+          branch_re='^([A-Z][A-Z0-9]+-[0-9]+)([/-]|$)'
+          title_key="" branch_key=""
+          if [[ "$PR_TITLE" =~ $title_re ]]; then title_key="${BASH_REMATCH[1]}"; fi
+          if [[ "$HEAD_REF" =~ $branch_re ]]; then branch_key="${BASH_REMATCH[1]}"; fi
+          canonical="${title_key:-$branch_key}"
+          if [[ -z "$canonical" ]]; then
+            fail "no Jira key: start the PR title with KEY-123: (any Jira project) or the branch name with KEY-123/"
+            exit 1
+          fi
+          keys=("$canonical")
+          if [[ -n "$title_key" && -n "$branch_key" && "$branch_key" != "$title_key" ]]; then keys+=("$branch_key"); fi
+
+          case "${JIRA_AUTH_SCHEME:-basic}" in
+            basic)  [[ -n "${JIRA_USER:-}" && -n "${JIRA_TOKEN:-}" ]] || inconclusive "Jira credentials are not available to this repository" ;;
+            bearer) [[ -n "${JIRA_TOKEN:-}" ]] || inconclusive "Jira credentials are not available to this repository" ;;
+            *) inconclusive "unknown JIRA_TRACEABILITY_AUTH_SCHEME" ;;
+          esac
+          # curl reads its credentials from stdin (-K -), never from its arguments.
+          auth_config() {
+            if [[ "$JIRA_AUTH_SCHEME" == bearer ]]; then
+              printf 'header = "Authorization: Bearer %s"\n' "$JIRA_TOKEN"
+            else
+              printf 'user = "%s:%s"\n' "$JIRA_USER" "$JIRA_TOKEN"
+            fi
+          }
+
+          body="$(mktemp)"
+          errors=0
+          for key in "${keys[@]}"; do
+            if ! code="$(auth_config \
+                | curl -sS --max-time 20 -K - -o "$body" -w '%{http_code}' \
+                  "$JIRA_BASE_URL/rest/api/3/issue/$key?fields=status,summary")"; then
+              inconclusive "could not reach Jira for $key"
+            fi
+            case "$code" in
+              200)
+                category="$(jq -r '.fields.status.statusCategory.key // empty' "$body")"
+                status="$(jq -r '.fields.status.name // empty' "$body")"
+                [[ -n "$category" ]] || inconclusive "unexpected Jira response for $key"
+                if [[ "$key" == "$canonical" && "$category" == "done" ]]; then
+                  fail "$key is Done ($status): reopen it, or use a follow-up ticket"
+                  errors=1
+                else
+                  summary "- ✅ $key: $status"
+                fi
+                ;;
+              404)
+                fail "$key not found in Jira (or not visible to the traceability account)"
+                errors=1
+                ;;
+              *)
+                inconclusive "Jira answered HTTP $code for $key"
+                ;;
+            esac
+          done
+          exit "$errors"
